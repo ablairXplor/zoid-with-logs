@@ -48,8 +48,8 @@ export type onDestroyPropType = EventHandlerType<void>;
 export type onResizePropType = EventHandlerType<void>;
 export type onFocusPropType = EventHandlerType<void>;
 export type onErrorPropType = EventHandlerType<mixed>;
+// eslint-disable-next-line no-use-before-define
 export type onPropsPropType<P> = ((PropsType<P>) => void) => {|
-  // eslint-disable-line no-use-before-define
   cancel: () => void,
 |};
 
