@@ -1,350 +1,246 @@
 /* @flow */
 /* eslint max-lines: 0 */
 
-import {
-  isSameDomain,
-  matchDomain,
-  getAllFramesInWindow,
-  type CrossDomainWindowType,
-  onCloseWindow,
-  assertSameDomain,
-} from "@krakenjs/cross-domain-utils/src";
-import {
-  markWindowKnown,
-  type CrossDomainFunctionType,
-} from "@krakenjs/post-robot/src";
-import { ZalgoPromise } from "@krakenjs/zalgo-promise/src";
-import { extend, onResize, elementReady, noop } from "@krakenjs/belter/src";
+import { isSameDomain, matchDomain, getAllFramesInWindow, type CrossDomainWindowType,
+    onCloseWindow, assertSameDomain } from 'cross-domain-utils/src';
+import { markWindowKnown, type CrossDomainFunctionType } from 'post-robot/src';
+import { ZalgoPromise } from 'zalgo-promise/src';
+import { extend, onResize, elementReady, noop } from 'belter/src';
 
-import {
-  getGlobal,
-  tryGlobal,
-  getInitialParentPayload,
-  updateChildWindowNameWithRef,
-} from "../lib";
-import { CONTEXT } from "../constants";
-import type {
-  NormalizedComponentOptionsType,
-  getSiblingsPropType,
-} from "../component";
-import type { PropsType, ChildPropsType } from "../component/props";
-import type { StringMatcherType } from "../types";
+import { getGlobal, tryGlobal, getInitialParentPayload, updateChildWindowNameWithRef } from '../lib';
+import { CONTEXT } from '../constants';
+import type { NormalizedComponentOptionsType, getSiblingsPropType } from '../component';
+import type { PropsType, ChildPropsType } from '../component/props';
+import type { StringMatcherType } from '../types';
 
-import { normalizeChildProps } from "./props";
+import { normalizeChildProps } from './props';
 
 export type ChildExportsType<P> = {|
-  updateProps: CrossDomainFunctionType<[PropsType<P>], void>,
-  close: CrossDomainFunctionType<[], void>,
-  name: string,
+    updateProps : CrossDomainFunctionType<[ PropsType<P> ], void>,
+    close : CrossDomainFunctionType<[], void>
 |};
 
 export type ChildHelpers<P, X> = {|
-  uid: string,
-  tag: string,
-  close: () => ZalgoPromise<void>,
-  focus: () => ZalgoPromise<void>,
-  resize: ({| width: ?number, height: ?number |}) => ZalgoPromise<void>,
-  onError: (mixed) => ZalgoPromise<void>,
-  onProps: ((PropsType<P>) => void) => {| cancel: () => void |},
-  getParent: () => CrossDomainWindowType,
-  getParentDomain: () => string,
-  show: () => ZalgoPromise<void>,
-  hide: () => ZalgoPromise<void>,
-  export: (X) => ZalgoPromise<void>,
-  getSiblings: getSiblingsPropType,
+    uid : string,
+    tag : string,
+    close : () => ZalgoPromise<void>,
+    focus : () => ZalgoPromise<void>,
+    resize : ({| width : ?number, height : ?number |}) => ZalgoPromise<void>,
+    onError : (mixed) => ZalgoPromise<void>,
+    onProps : ((PropsType<P>) => void) => {| cancel : () => void |},
+    getParent : () => CrossDomainWindowType,
+    getParentDomain : () => string,
+    show : () => ZalgoPromise<void>,
+    hide : () => ZalgoPromise<void>,
+    export : (X) => ZalgoPromise<void>,
+    getSiblings : getSiblingsPropType
 |};
 
-function checkParentDomain(
-  allowedParentDomains: StringMatcherType,
-  domain: string
-) {
-  if (!matchDomain(allowedParentDomains, domain)) {
-    throw new Error(`Can not be rendered by domain: ${domain}`);
-  }
+function checkParentDomain(allowedParentDomains : StringMatcherType, domain : string) {
+    if (!matchDomain(allowedParentDomains, domain)) {
+        throw new Error(`Can not be rendered by domain: ${ domain }`);
+    }
 }
 
-function focus(): ZalgoPromise<void> {
-  return ZalgoPromise.try(() => {
-    window.focus();
-  });
+function focus() : ZalgoPromise<void> {
+    return ZalgoPromise.try(() => {
+        window.focus();
+    });
 }
 
-function destroy(): ZalgoPromise<void> {
-  return ZalgoPromise.try(() => {
-    window.close();
-  });
-}
-
-// Compares the first numerical value of the parent and child versions of zoid,
-// ensuring that an error is only thrown when major versions of Zoid do not match.
-// Additionally, zoid version strings should be in snake_case format (10_1_0, 10_2_0, 11_0_0, etc.)
-function versionCompatabilityCheck(
-  version1: string,
-  version2: string
-): boolean {
-  if (!/_/.test(version1) || !/_/.test(version2)) {
-    throw new Error(
-      `Versions are in an invalid format (${version1}, ${version2})`
-    );
-  }
-
-  return version1.split("_")[0] === version2.split("_")[0];
+function destroy() : ZalgoPromise<void> {
+    return ZalgoPromise.try(() => {
+        window.close();
+    });
 }
 
 export type ChildComponent<P, X> = {|
-  getProps: () => ChildPropsType<P, X>,
-  init: () => ZalgoPromise<void>,
+    getProps : () => ChildPropsType<P, X>,
+    init : () => ZalgoPromise<void>
 |};
 
-export function childComponent<P, X, C, ExtType>(
-  options: NormalizedComponentOptionsType<P, X, C, ExtType>
-): ChildComponent<P, X> {
-  const { tag, propsDef, autoResize, allowedParentDomains } = options;
+export function childComponent<P, X, C>(options : NormalizedComponentOptionsType<P, X, C>) : ChildComponent<P, X> {
+    const { tag, propsDef, autoResize, allowedParentDomains } = options;
 
-  const onPropHandlers = [];
+    const onPropHandlers = [];
 
-  const { parent, payload } = getInitialParentPayload();
-  const { win: parentComponentWindow, domain: parentDomain } = parent;
+    const { parent, payload } = getInitialParentPayload();
+    const { win: parentComponentWindow, domain: parentDomain } = parent;
 
-  let props: ChildPropsType<P, X>;
-  const exportsPromise = new ZalgoPromise();
+    let props : ChildPropsType<P, X>;
+    const exportsPromise = new ZalgoPromise();
 
-  const {
-    version,
-    uid,
-    exports: parentExports,
-    context,
-    props: initialProps,
-  } = payload;
+    const { version, uid, exports: parentExports, context, props: initialProps } = payload;
 
-  if (!versionCompatabilityCheck(version, __ZOID__.__VERSION__)) {
-    throw new Error(
-      `Parent window has zoid version ${version}, child window has version ${__ZOID__.__VERSION__}`
-    );
-  }
+    if (version !== __ZOID__.__VERSION__) {
+        throw new Error(`Parent window has zoid version ${ version }, child window has version ${ __ZOID__.__VERSION__ }`);
+    }
 
-  const {
-    show,
-    hide,
-    close,
-    onError,
-    checkClose,
-    export: parentExport,
-    resize: parentResize,
-    init: parentInit,
-  } = parentExports;
+    const { show, hide, close, onError, checkClose, export: parentExport, resize: parentResize, init: parentInit } = parentExports;
 
-  const getParent = () => parentComponentWindow;
-  const getParentDomain = () => parentDomain;
+    const getParent = () => parentComponentWindow;
+    const getParentDomain = () => parentDomain;
 
-  const onProps = (handler: Function) => {
-    onPropHandlers.push(handler);
-    return {
-      cancel: () => {
-        onPropHandlers.splice(onPropHandlers.indexOf(handler), 1);
-      },
+    const onProps = (handler : Function) => {
+        onPropHandlers.push(handler);
+        return {
+            cancel: () => {
+                onPropHandlers.splice(onPropHandlers.indexOf(handler), 1);
+            }
+        };
     };
-  };
 
-  const resize = ({
-    width,
-    height,
-  }: {|
-    width: ?number,
-    height: ?number,
-  |}): ZalgoPromise<void> => {
-    return parentResize.fireAndForget({ width, height });
-  };
+    const resize = ({ width, height } : {| width : ?number, height : ?number |}) : ZalgoPromise<void> => {
+        return parentResize.fireAndForget({ width, height });
+    };
 
-  const xport = (xports: X): ZalgoPromise<void> => {
-    exportsPromise.resolve(xports);
-    return parentExport(xports);
-  };
+    const xport = (xports : X) : ZalgoPromise<void> => {
+        exportsPromise.resolve(xports);
+        return parentExport(xports);
+    };
 
-  const getSiblings = ({ anyParent } = {}) => {
-    const result = [];
-    const currentParent = props.parent;
+    const getSiblings = ({ anyParent } = {}) => {
+        const result = [];
+        const currentParent = props.parent;
 
-    if (typeof anyParent === "undefined") {
-      anyParent = !currentParent;
-    }
-
-    if (!anyParent && !currentParent) {
-      throw new Error(`No parent found for ${tag} child`);
-    }
-
-    for (const win of getAllFramesInWindow(window)) {
-      if (!isSameDomain(win)) {
-        continue;
-      }
-
-      const xprops: ChildPropsType<mixed, mixed> = assertSameDomain(win).xprops;
-
-      if (!xprops || getParent() !== xprops.getParent()) {
-        continue;
-      }
-
-      const winParent = xprops.parent;
-
-      if (!anyParent && currentParent) {
-        if (!winParent || winParent.uid !== currentParent.uid) {
-          continue;
+        if (typeof anyParent === 'undefined') {
+            anyParent = !currentParent;
         }
-      }
 
-      const xports = tryGlobal(win, (global) => global.exports);
+        if (!anyParent && !currentParent) {
+            throw new Error(`No parent found for ${ tag } child`);
+        }
 
-      result.push({
-        props: xprops,
-        exports: xports,
-      });
-    }
+        for (const win of getAllFramesInWindow(window)) {
+            if (!isSameDomain(win)) {
+                continue;
+            }
 
-    return result;
-  };
+            const xprops : ChildPropsType<mixed, mixed> = assertSameDomain(win).xprops;
 
-  const getHelpers = (): ChildHelpers<P, X> => {
-    return {
-      tag,
-      show,
-      hide,
-      close,
-      focus,
-      onError,
-      resize,
-      getSiblings,
-      onProps,
-      getParent,
-      getParentDomain,
-      uid,
-      export: xport,
+            if (!xprops || getParent() !== xprops.getParent()) {
+                continue;
+            }
+
+            const winParent = xprops.parent;
+
+            if (!anyParent && currentParent) {
+                if (!winParent || winParent.uid !== currentParent.uid) {
+                    continue;
+                }
+            }
+
+            const xports = tryGlobal(win, global => global.exports);
+
+            result.push({
+                props:   xprops,
+                exports: xports
+            });
+        }
+
+        return result;
     };
-  };
 
-  const watchForClose = () => {
-    window.addEventListener("beforeunload", () => {
-      checkClose.fireAndForget();
-    });
+    const getHelpers = () : ChildHelpers<P, X> => {
+        return {
+            tag, show, hide, close, focus, onError, resize, getSiblings,
+            onProps, getParent, getParentDomain, uid, export: xport
+        };
+    };
 
-    window.addEventListener("unload", () => {
-      checkClose.fireAndForget();
-    });
+    const watchForClose = () => {
+        window.addEventListener('beforeunload', () => {
+            checkClose.fireAndForget();
+        });
 
-    onCloseWindow(parentComponentWindow, () => {
-      destroy();
-    });
-  };
+        window.addEventListener('unload', () => {
+            checkClose.fireAndForget();
+        });
 
-  const setProps = (
-    newProps: PropsType<P>,
-    origin: string,
-    isUpdate: boolean = false
-  ) => {
-    const helpers = getHelpers();
-    const normalizedProps = normalizeChildProps(
-      parentComponentWindow,
-      propsDef,
-      newProps,
-      origin,
-      helpers,
-      isUpdate
-    );
+        onCloseWindow(parentComponentWindow, () => {
+            destroy();
+        });
+    };
 
-    if (props) {
-      extend(props, normalizedProps);
-    } else {
-      props = normalizedProps;
-    }
+    const setProps = (newProps : PropsType<P>, origin : string, isUpdate : boolean = false) => {
+        const helpers = getHelpers();
+        const normalizedProps = normalizeChildProps(parentComponentWindow, propsDef, newProps, origin, helpers, isUpdate);
 
-    for (const handler of onPropHandlers) {
-      handler(props);
-    }
-  };
+        if (props) {
+            extend(props, normalizedProps);
+        } else {
+            props = normalizedProps;
+        }
 
-  const getAutoResize = (): ZalgoPromise<{|
-    width: boolean,
-    height: boolean,
-    element: ?HTMLElement,
-  |}> => {
-    const {
-      width = false,
-      height = false,
-      element: elementRef = "body",
-    } = autoResize;
-    return elementReady(elementRef)
-      .catch(noop)
-      .then((element) => {
-        return { width, height, element };
-      });
-  };
+        for (const handler of onPropHandlers) {
+            handler(props);
+        }
+    };
 
-  const watchForResize = (): ?ZalgoPromise<void> => {
-    return getAutoResize().then(({ width, height, element }) => {
-      if (!element || (!width && !height) || context === CONTEXT.POPUP) {
-        return;
-      }
+    const getAutoResize = () : ZalgoPromise<{| width : boolean, height : boolean, element : ?HTMLElement |}> => {
+        const { width = false, height = false, element: elementRef = 'body' } = autoResize;
+        return elementReady(elementRef).catch(noop).then(element => {
+            return { width, height, element };
+        });
+    };
 
-      onResize(
-        element,
-        ({ width: newWidth, height: newHeight }) => {
-          resize({
-            width: width ? newWidth : undefined,
-            height: height ? newHeight : undefined,
-          });
-        },
-        { width, height }
-      );
-    });
-  };
+    const watchForResize = () : ?ZalgoPromise<void> => {
+        return getAutoResize().then(({ width, height, element }) => {
+            if (!element || (!width && !height) || context === CONTEXT.POPUP) {
+                return;
+            }
 
-  const updateProps = (newProps: PropsType<P>): ZalgoPromise<void> => {
-    return ZalgoPromise.try(() => setProps(newProps, parentDomain, true));
-  };
+            onResize(element, ({ width: newWidth, height: newHeight }) => {
+                resize({
+                    width:  width ? newWidth : undefined,
+                    height: height ? newHeight : undefined
+                });
+            }, { width, height });
+        });
+    };
 
-  const init = () => {
-    return ZalgoPromise.try(() => {
-      let updatedChildName = "";
-      if (isSameDomain(parentComponentWindow)) {
-        updatedChildName =
-          updateChildWindowNameWithRef({
-            componentName: options.name,
-            parentComponentWindow,
-          }) || "";
-      }
+    const updateProps = (newProps : (PropsType<P>)) : ZalgoPromise<void> => {
+        return ZalgoPromise.try(() => setProps(newProps, parentDomain, true));
+    };
 
-      getGlobal(window).exports = options.exports({
-        getExports: () => exportsPromise,
-      });
+    const init = () => {
+        return ZalgoPromise.try(() => {
+            if (isSameDomain(parentComponentWindow)) {
+                updateChildWindowNameWithRef({
+                    componentName: options.name,
+                    parentComponentWindow
+                });
+            }
 
-      checkParentDomain(allowedParentDomains, parentDomain);
-      markWindowKnown(parentComponentWindow);
-      watchForClose();
+            getGlobal(window).exports = options.exports({
+                getExports: () => exportsPromise
+            });
 
-      return parentInit({
-        name: updatedChildName,
-        updateProps,
-        close: destroy,
-      });
-    })
-      .then(() => {
-        return watchForResize();
-      })
-      .catch((err) => {
-        onError(err);
-      });
-  };
+            checkParentDomain(allowedParentDomains, parentDomain);
+            markWindowKnown(parentComponentWindow);
+            watchForClose();
 
-  const getProps = () => {
-    if (props) {
-      return props;
-    } else {
-      setProps(initialProps, parentDomain);
-      return props;
-    }
-  };
+            return parentInit({ updateProps, close: destroy });
 
-  return {
-    init,
-    getProps,
-  };
+        }).then(() => {
+            return watchForResize();
+
+        }).catch(err => {
+            onError(err);
+        });
+    };
+
+    const getProps = () => {
+        if (props) {
+            return props;
+        } else {
+            setProps(initialProps, parentDomain);
+            return props;
+        }
+    };
+
+    return {
+        init,
+        getProps
+    };
 }
