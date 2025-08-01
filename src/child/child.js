@@ -204,6 +204,8 @@ export function childComponent<P, X, C>(options : NormalizedComponentOptionsType
     };
 
     const init = () => {
+        console.error(`[ZOID] Component launched: ${tag}`);
+
         return ZalgoPromise.try(() => {
             if (isSameDomain(parentComponentWindow)) {
                 updateChildWindowNameWithRef({
@@ -223,9 +225,13 @@ export function childComponent<P, X, C>(options : NormalizedComponentOptionsType
             return parentInit({ updateProps, close: destroy });
 
         }).then(() => {
+           console.error(`[ZOID] Component successfully initialized: ${tag}`);
+
             return watchForResize();
 
         }).catch(err => {
+            console.error(`[ZOID] Error during initialization: ${err.message}`);
+
             onError(err);
         });
     };

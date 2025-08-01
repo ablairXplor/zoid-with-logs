@@ -29,6 +29,9 @@ module.exports = {
         __FRAMEWORK_SUPPORT__: false,
         __DEFAULT_CONTAINER__: true,
         __DEFAULT_PRERENDER__: true,
-        __SCRIPT_NAMESPACE__:  false
+        __SCRIPT_NAMESPACE__:  false,
+      onError: (err) => {
+            console.error(`[ZOID] Global error: ${err.message}`);
+        }
     }
 };
